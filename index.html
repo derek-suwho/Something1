@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D Avatar Chat Room</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div id="container">
+        <canvas id="three-canvas"></canvas>
+        
+        <div id="chat-interface">
+            <div id="chat-messages"></div>
+            <div id="input-container">
+                <input type="text" id="chat-input" placeholder="Type your message or click 🎤 to speak...">
+                <button id="voice-button">🎤</button>
+                <button id="send-button">Send</button>
+            </div>
+        </div>
+
+        <div id="controls">
+            <button id="toggle-chat">💬</button>
+            <div id="status">Ready</div>
+        </div>
+
+        <div id="settings">
+            <input type="password" id="openai-key" placeholder="Enter OpenAI API Key">
+            <button id="save-key">Save Key</button>
+        </div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    <script src="script.js"></script>
+</body>
+</html>
