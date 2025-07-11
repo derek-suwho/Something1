@@ -6,11 +6,22 @@ class AvatarChatRoom {
         this.controls = null;
         this.avatar = null;
         this.room = {};
-        this.openaiKey = '';
+        this.openaiKey = window.CONFIG?.OPENAI_API_KEY || '';
+        this.selectedModel = window.CONFIG?.DEFAULT_MODEL || 'gpt-3.5-turbo';
         this.isListening = false;
         this.isSpeaking = false;
         this.recognition = null;
         this.synthesis = window.speechSynthesis;
+        
+        // Movement controls
+        this.keys = {};
+        this.moveSpeed = 0.1;
+        
+        // Security: Rate limiting
+        this.lastMessageTime = 0;
+        this.messageCount = 0;
+        this.rateLimitWindow = 60000; // 1 minute
+        this.maxMessagesPerWindow = 20;
         
         this.init();
         this.setupEventListeners();
@@ -18,35 +29,68 @@ class AvatarChatRoom {
     }
 
     init() {
-        this.setupThreeJS();
-        this.createRoom();
-        this.createAvatar();
-        this.animate();
-        this.addMessage('system', 'Welcome! Set your OpenAI API key and start chatting with the avatar.');
+        console.log('Initializing AvatarChatRoom...');
+        try {
+            this.setupThreeJS();
+            console.log('Three.js setup complete');
+            this.createRoom();
+            console.log('Room created');
+            this.createAvatar();
+            console.log('Avatar created');
+            this.animate();
+            console.log('Animation started');
+            if (this.openaiKey && this.openaiKey !== 'your_openai_api_key_here') {
+                this.addMessage('system', 'Welcome! OpenAI API key loaded from config. Ready to chat!');
+            } else {
+                this.addMessage('system', 'Welcome! Set your OpenAI API key in config.js or use the input field.');
+            }
+        } catch (error) {
+            console.error('Error during initialization:', error);
+            this.addMessage('system', 'Error initializing 3D scene. Check console for details.');
+        }
     }
 
     setupThreeJS() {
         const canvas = document.getElementById('three-canvas');
+        if (!canvas) {
+            throw new Error('Canvas element not found');
+        }
         
+        if (typeof THREE === 'undefined') {
+            throw new Error('Three.js not loaded');
+        }
+
         this.scene = new THREE.Scene();
         this.scene.background = new THREE.Color(0x1a1a2e);
 
         this.camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-        this.camera.position.set(0, 1.6, 3);
+        this.camera.position.set(0, 1.7, 4);
 
         this.renderer = new THREE.WebGLRenderer({ canvas: canvas, antialias: true });
         this.renderer.setSize(window.innerWidth, window.innerHeight);
         this.renderer.shadowMap.enabled = true;
         this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-
-        this.controls = new THREE.OrbitControls(this.camera, this.renderer.domElement);
-        this.controls.enableDamping = true;
-        this.controls.dampingFactor = 0.05;
-        this.controls.maxDistance = 10;
-        this.controls.minDistance = 1;
-        this.controls.maxPolarAngle = Math.PI / 2.1;
+        
+        if (typeof THREE.OrbitControls === 'undefined') {
+            console.warn('OrbitControls not loaded, using basic camera controls');
+            this.controls = null;
+        } else {
+            this.controls = new THREE.OrbitControls(this.camera, this.renderer.domElement);
+            this.controls.enableDamping = true;
+            this.controls.dampingFactor = 0.05;
+            this.controls.maxDistance = 10;
+            this.controls.minDistance = 1;
+            this.controls.maxPolarAngle = Math.PI / 2.1;
+            // Fix inverted mouse movement
+            this.controls.screenSpacePanning = false;
+            this.controls.reverseOrbit = false;
+        }
 
         window.addEventListener('resize', () => this.onWindowResize());
+        
+        // Add keyboard event listeners for WASD movement
+        window.addEventListener('keydown', (event) => this.onKeyDown(event));
+        window.addEventListener('keyup', (event) => this.onKeyUp(event));
     }
 
     createRoom() {
@@ -107,6 +151,114 @@ class AvatarChatRoom {
         avatarLight.position.set(0, 2, 0);
         this.scene.add(avatarLight);
         this.room.avatarLight = avatarLight;
+
+        // Add decorations
+        this.createDecorations();
+    }
+
+    createDecorations() {
+        // Create chairs
+        this.createChair(-2.5, 0, 1.5, 0);
+        this.createChair(2.5, 0, 1.5, Math.PI);
+        this.createChair(-1, 0, 3, -Math.PI / 4);
+
+        // Create plants
+        this.createPlant(-3, 0, -3);
+        this.createPlant(3, 0, -3);
+        this.createPlant(-3, 0, 3);
+        this.createPlant(2, 0, -2);
+    }
+
+    createChair(x, y, z, rotation) {
+        const chairGroup = new THREE.Group();
+
+        // Chair seat
+        const seatGeometry = new THREE.BoxGeometry(0.8, 0.08, 0.8);
+        const seatMaterial = new THREE.MeshLambertMaterial({ color: 0x8B4513 });
+        const seat = new THREE.Mesh(seatGeometry, seatMaterial);
+        seat.position.set(0, 0.5, 0);
+        seat.castShadow = true;
+        seat.receiveShadow = true;
+        chairGroup.add(seat);
+
+        // Chair backrest
+        const backGeometry = new THREE.BoxGeometry(0.8, 0.8, 0.08);
+        const backMaterial = new THREE.MeshLambertMaterial({ color: 0x8B4513 });
+        const backrest = new THREE.Mesh(backGeometry, backMaterial);
+        backrest.position.set(0, 0.9, -0.36);
+        backrest.castShadow = true;
+        backrest.receiveShadow = true;
+        chairGroup.add(backrest);
+
+        // Chair legs
+        const legGeometry = new THREE.CylinderGeometry(0.03, 0.03, 0.5);
+        const legMaterial = new THREE.MeshLambertMaterial({ color: 0x654321 });
+
+        const legPositions = [
+            [-0.35, 0.25, -0.35],
+            [0.35, 0.25, -0.35],
+            [-0.35, 0.25, 0.35],
+            [0.35, 0.25, 0.35]
+        ];
+
+        legPositions.forEach(pos => {
+            const leg = new THREE.Mesh(legGeometry, legMaterial);
+            leg.position.set(pos[0], pos[1], pos[2]);
+            leg.castShadow = true;
+            chairGroup.add(leg);
+        });
+
+        chairGroup.position.set(x, y, z);
+        chairGroup.rotation.y = rotation;
+        this.scene.add(chairGroup);
+    }
+
+    createPlant(x, y, z) {
+        const plantGroup = new THREE.Group();
+
+        // Plant pot
+        const potGeometry = new THREE.CylinderGeometry(0.3, 0.25, 0.4, 8);
+        const potMaterial = new THREE.MeshLambertMaterial({ color: 0x8B4513 });
+        const pot = new THREE.Mesh(potGeometry, potMaterial);
+        pot.position.set(0, 0.2, 0);
+        pot.castShadow = true;
+        pot.receiveShadow = true;
+        plantGroup.add(pot);
+
+        // Plant stem
+        const stemGeometry = new THREE.CylinderGeometry(0.02, 0.03, 0.8);
+        const stemMaterial = new THREE.MeshLambertMaterial({ color: 0x228B22 });
+        const stem = new THREE.Mesh(stemGeometry, stemMaterial);
+        stem.position.set(0, 0.8, 0);
+        stem.castShadow = true;
+        plantGroup.add(stem);
+
+        // Plant leaves
+        const leafGeometry = new THREE.SphereGeometry(0.3, 8, 6);
+        const leafMaterial = new THREE.MeshLambertMaterial({ color: 0x32CD32 });
+        
+        // Main leaf cluster
+        const mainLeaves = new THREE.Mesh(leafGeometry, leafMaterial);
+        mainLeaves.position.set(0, 1.2, 0);
+        mainLeaves.scale.set(1, 0.6, 1);
+        mainLeaves.castShadow = true;
+        plantGroup.add(mainLeaves);
+
+        // Additional leaf clusters
+        const leaf1 = new THREE.Mesh(leafGeometry, leafMaterial);
+        leaf1.position.set(0.15, 1.0, 0.1);
+        leaf1.scale.set(0.7, 0.5, 0.7);
+        leaf1.castShadow = true;
+        plantGroup.add(leaf1);
+
+        const leaf2 = new THREE.Mesh(leafGeometry, leafMaterial);
+        leaf2.position.set(-0.12, 1.1, -0.08);
+        leaf2.scale.set(0.6, 0.4, 0.6);
+        leaf2.castShadow = true;
+        plantGroup.add(leaf2);
+
+        plantGroup.position.set(x, y, z);
+        this.scene.add(plantGroup);
     }
 
     createAvatar() {
@@ -126,7 +278,7 @@ class AvatarChatRoom {
         avatarGroup.add(head);
 
         // Body
-        const bodyGeometry = new THREE.CapsuleGeometry(0.2, 1.2, 4, 8);
+        const bodyGeometry = new THREE.CylinderGeometry(0.2, 0.2, 1.2, 8);
         const bodyMaterial = new THREE.MeshPhongMaterial({ 
             color: 0x357abd,
             transparent: true,
@@ -197,7 +349,9 @@ class AvatarChatRoom {
             this.room.avatarLight.intensity = 1;
         }
 
-        this.controls.update();
+        if (this.controls) {
+            this.controls.update();
+        }
         this.renderer.render(this.scene, this.camera);
     }
 
@@ -213,7 +367,13 @@ class AvatarChatRoom {
         const voiceButton = document.getElementById('voice-button');
         const toggleChat = document.getElementById('toggle-chat');
         const saveKeyButton = document.getElementById('save-key');
+        const modelPicker = document.getElementById('model-picker');
         const chatInterface = document.getElementById('chat-interface');
+
+        if (!chatInput || !sendButton || !voiceButton || !toggleChat || !saveKeyButton || !modelPicker || !chatInterface) {
+            console.error('Some UI elements not found');
+            return;
+        }
 
         sendButton.addEventListener('click', () => this.sendMessage());
         chatInput.addEventListener('keypress', (e) => {
@@ -226,9 +386,11 @@ class AvatarChatRoom {
         });
 
         saveKeyButton.addEventListener('click', () => this.saveApiKey());
+        modelPicker.addEventListener('change', (e) => this.changeModel(e.target.value));
 
         this.setupSpeechRecognition();
     }
+
 
     setupSpeechRecognition() {
         if ('webkitSpeechRecognition' in window) {
@@ -267,12 +429,73 @@ class AvatarChatRoom {
         }
     }
 
-    async sendMessage() {
-        const input = document.getElementById('chat-input');
-        const message = input.value.trim();
+    // Security: Input sanitization
+    sanitizeInput(input) {
+        if (typeof input !== 'string') return '';
         
-        if (!message) return;
-        if (!this.openaiKey) {
+        // Remove potential XSS vectors
+        return input
+            .replace(/[<>]/g, '') // Remove angle brackets
+            .replace(/javascript:/gi, '') // Remove javascript: URLs
+            .replace(/on\w+\s*=/gi, '') // Remove event handlers
+            .replace(/\s+/g, ' ') // Normalize whitespace
+            .trim()
+            .substring(0, 500); // Limit length
+    }
+
+    // Security: Rate limiting check
+    checkRateLimit() {
+        const now = Date.now();
+        
+        // Reset counter if window has passed
+        if (now - this.lastMessageTime > this.rateLimitWindow) {
+            this.messageCount = 0;
+        }
+        
+        // Check if rate limit exceeded
+        if (this.messageCount >= this.maxMessagesPerWindow) {
+            return false;
+        }
+        
+        this.messageCount++;
+        this.lastMessageTime = now;
+        return true;
+    }
+
+    async sendMessage() {
+        console.log('sendMessage called');
+        const input = document.getElementById('chat-input');
+        if (!input) {
+            console.error('Chat input element not found');
+            return;
+        }
+        const rawMessage = input.value.trim();
+        console.log('Raw message:', rawMessage);
+        
+        if (!rawMessage) {
+            console.log('No message to send');
+            return;
+        }
+        
+        // Security: Rate limiting
+        if (!this.checkRateLimit()) {
+            this.addMessage('system', 'Rate limit exceeded. Please wait a moment before sending another message.');
+            return;
+        }
+        
+        // Security: Input sanitization and validation
+        const message = this.sanitizeInput(rawMessage);
+        if (!message) {
+            this.addMessage('system', 'Invalid message content.');
+            return;
+        }
+        
+        if (message.length > 500) {
+            this.addMessage('system', 'Message too long. Please keep messages under 500 characters.');
+            return;
+        }
+        
+        if (!this.openaiKey || this.openaiKey === 'your_openai_api_key_here') {
             this.addMessage('system', 'Please set your OpenAI API key first.');
             return;
         }
@@ -287,8 +510,9 @@ class AvatarChatRoom {
             this.speak(response);
             this.updateStatus('Ready');
         } catch (error) {
-            console.error('OpenAI API Error:', error);
-            this.addMessage('system', 'Sorry, I encountered an error. Please check your API key and try again.');
+            // Security: Don't expose detailed error information
+            console.error('API Error:', error);
+            this.addMessage('system', 'Unable to process your request. Please try again.');
             this.updateStatus('Error');
         }
     }
@@ -301,7 +525,7 @@ class AvatarChatRoom {
                 'Authorization': `Bearer ${this.openaiKey}`
             },
             body: JSON.stringify({
-                model: 'gpt-3.5-turbo',
+                model: this.selectedModel,
                 messages: [
                     {
                         role: 'system',
@@ -312,8 +536,8 @@ class AvatarChatRoom {
                         content: message
                     }
                 ],
-                max_tokens: 150,
-                temperature: 0.7
+                max_tokens: window.CONFIG?.MAX_TOKENS || 150,
+                temperature: window.CONFIG?.TEMPERATURE || 0.7
             })
         });
 
@@ -350,16 +574,40 @@ class AvatarChatRoom {
 
     addMessage(type, content) {
         const messagesContainer = document.getElementById('chat-messages');
+        if (!messagesContainer) {
+            console.error('Messages container not found');
+            return;
+        }
+        
         const messageDiv = document.createElement('div');
-        messageDiv.className = `message ${type}`;
-        messageDiv.textContent = content;
+        
+        // Security: Validate message type
+        const validTypes = ['user', 'avatar', 'system'];
+        const safeType = validTypes.includes(type) ? type : 'system';
+        
+        messageDiv.className = `message ${safeType}`;
+        
+        // Security: Use textContent to prevent XSS
+        messageDiv.textContent = String(content).substring(0, 1000);
         
         messagesContainer.appendChild(messageDiv);
         messagesContainer.scrollTop = messagesContainer.scrollHeight;
+        
+        // Security: Limit message history to prevent memory issues
+        const messages = messagesContainer.children;
+        if (messages.length > 100) {
+            messagesContainer.removeChild(messages[0]);
+        }
     }
 
     updateStatus(status) {
         document.getElementById('status').textContent = status;
+    }
+
+    changeModel(modelValue) {
+        this.selectedModel = modelValue;
+        localStorage.setItem('selected-model', modelValue);
+        this.addMessage('system', `AI model changed to ${modelValue}`);
     }
 
     saveApiKey() {
@@ -383,10 +631,29 @@ class AvatarChatRoom {
             keyInput.value = '••••••••••••••••';
             this.addMessage('system', 'API key loaded. Ready to chat!');
         }
+
+        const savedModel = localStorage.getItem('selected-model');
+        if (savedModel) {
+            this.selectedModel = savedModel;
+            document.getElementById('model-picker').value = savedModel;
+        }
     }
 }
 
 // Initialize the application
 window.addEventListener('DOMContentLoaded', () => {
-    new AvatarChatRoom();
+    console.log('DOM loaded, initializing AvatarChatRoom...');
+    try {
+        new AvatarChatRoom();
+    } catch (error) {
+        console.error('Failed to initialize AvatarChatRoom:', error);
+        // Show error message to user
+        const messagesContainer = document.getElementById('chat-messages');
+        if (messagesContainer) {
+            const errorDiv = document.createElement('div');
+            errorDiv.className = 'message system';
+            errorDiv.textContent = 'Failed to initialize 3D scene. Check console for details.';
+            messagesContainer.appendChild(errorDiv);
+        }
+    }
 });

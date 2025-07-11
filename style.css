@@ -162,6 +162,7 @@ body {
     display: flex;
     gap: 10px;
     align-items: center;
+    flex-wrap: wrap;
 }
 
 #openai-key {
@@ -192,6 +193,19 @@ body {
 
 #save-key:hover {
     background: #357abd;
+}
+
+#model-picker {
+    padding: 8px 12px;
+    border: none;
+    border-radius: 6px;
+    background: rgba(0, 0, 0, 0.8);
+    color: white;
+    outline: none;
+    backdrop-filter: blur(10px);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    cursor: pointer;
+    font-size: 12px;
 }
 
 .chat-messages::-webkit-scrollbar {
